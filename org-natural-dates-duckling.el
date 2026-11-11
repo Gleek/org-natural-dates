@@ -306,7 +306,7 @@ Single signs use today; double signs use the supplied REFERENCE."
           (user-error "Date expression was not understood")))
       (when (and entity (not (equal (alist-get 'kind entity) "single")))
         (user-error "Time ranges and day periods are not supported yet"))
-      (when (and entity (not (member (alist-get 'grain entity) '("Day" "Hour" "Minute" "Second"))))
+      (when (and entity (not (member (alist-get 'grain entity) '("Week" "Day" "Hour" "Minute" "Second"))))
         (user-error "Specify a particular day, not just a month or year"))
       (let* ((start (and entity (alist-get 'start entity)))
              (end (and entity (alist-get 'end entity)))

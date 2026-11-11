@@ -71,6 +71,8 @@ The original Elisp parser remains the default unless this mode is enabled.
 
 | Input                     | Result                                      |
 | ~tomorrow at 8pm~          | Tomorrow, 20:00                             |
+| ~next week~                | Monday at the start of next week            |
+| ~in one week~              | Seven days from today                       |
 | ~19th next month at 20:00~ | The 19th of next month, 20:00                |
 | ~+2d~, ~+2~, ~+1w~, ~-2d~ | Offsets from today                          |
 | ~+2h~                     | Two hours from now                          |
