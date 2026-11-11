@@ -1,6 +1,9 @@
 EMACS ?= emacs
 
-.PHONY: lint test check clean
+.PHONY: lint test check clean helper
+
+helper:
+	cargo build --release --locked --manifest-path duckling-cli/Cargo.toml
 
 ## Run all checks (lint + test) — use before pushing
 check: lint test
@@ -9,7 +12,7 @@ check: lint test
 lint:
 	$(EMACS) --batch -L . \
 	  --eval '(setq byte-compile-error-on-warn t)' \
-	  -f batch-byte-compile org-natural-dates.el
+	  -f batch-byte-compile org-natural-dates.el org-natural-dates-duckling.el
 	$(EMACS) --batch -L . \
 	  --eval '(setq checkdoc-spellcheck-documentation-flag nil)' \
 	  --eval '(checkdoc-file "org-natural-dates.el")' \
@@ -18,7 +21,7 @@ lint:
 ## Run ERT tests
 test:
 	$(EMACS) --batch -L . \
-	  -l org-natural-dates-test.el \
+	  -l org-natural-dates-test.el -l org-natural-dates-duckling-test.el \
 	  -f ert-run-tests-batch-and-exit
 
 ## Remove byte-compiled files

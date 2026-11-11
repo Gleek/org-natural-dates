@@ -22,5 +22,8 @@ jobs:
         with:
           version: ${{ matrix.emacs_version }}
 
+      - name: Build Duckling helper
+        run: make helper
+
       - name: Lint and Test
         run: make check

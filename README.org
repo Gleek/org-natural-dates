@@ -18,6 +18,77 @@ Type what you mean — =tomorrow at 3pm=, =every Friday=, =in 3 days= — and le
 
 Works with =org-schedule=, =org-deadline=, Org Agenda, and =org-capture=.
 
+** Optional local Duckling backend
+
+The fork's ~org-natural-dates-duckling-mode~ replaces text interpretation in
+Org's existing calendar prompt.  This covers ~C-c .~, ~C-c !~, scheduling,
+deadlines, and packages such as org-timegrid that call ~org-read-date~.  Calendar
+navigation and event decorations continue to use Org's UI.  Standalone Calendar
+and unrelated date readers are not changed.
+
+Build the helper once with Rust/Cargo:
+
+#+begin_src sh
+make helper
+make check
+#+end_src
+
+There is no Docker, server, model, or network connection at runtime.
+
+#+begin_src emacs-lisp
+(require 'org-natural-dates-duckling)
+;; Set explicitly if your package manager builds Elisp in another directory.
+(setq org-natural-dates-duckling-program "/path/to/org-natural-dates/duckling-cli/target/release/org-natural-dates-duckling")
+(org-natural-dates-duckling-mode 1)
+(add-hook 'org-capture-before-finalize-hook #'org-natural-dates-capture-finalize-hook)
+#+end_src
+
+The original Elisp parser remains the default unless this mode is enabled.
+~org-natural-dates-parser-function~ can select a task parser independently.
+
+| Input                     | Result                                      |
+| ~tomorrow at 8pm~          | Tomorrow, 20:00                             |
+| ~19th next month at 20:00~ | The 19th of next month, 20:00                |
+| ~+2d~, ~+2~, ~+1w~, ~-2d~ | Offsets from today                          |
+| ~+2h~                     | Two hours from now                          |
+| ~++2d~, ~--1w~            | Offsets from the date being edited          |
+| ~.~                       | Today                                       |
+
+Shorthand is translated to full unit names before Duckling parses it.  Blank
+input accepts the default/selected date.  Clock-only edits keep the selected
+day.  Unsupported text raises an error, with no automatic fallback to Org's
+permissive text parser.  RET validates while the minibuffer remains open so
+invalid expressions can be corrected.
+
+Capture extracts the title and adds a schedule, for example:
+
+#+begin_example
+* TODO Family dinner on 19th next month at 8pm
+#+end_example
+
+becomes ~* TODO Family dinner~ with the corresponding ~SCHEDULED:~ timestamp.
+~due~, ~by~, and ~deadline~ select ~DEADLINE:~.  Ordinary captures, including
+~Read chapter 8~, remain unchanged.  Meal titles such as ~Lunch~ are retained.
+
+Capture recurrence reuses the existing Org repeater parser, including ~every
+day~, ~every Friday~, ~every 2 weeks~, and ~every other month~.  The shared
+calendar prompt rejects recurrence because ~org-read-date~ returns a date, not
+a repeater; use natural-language capture or this package's scheduling wrappers
+for those expressions.  Existing repeaters survive timestamp edits.
+
+Current limits of Rust Duckling 0.4.0:
+
+- Bare hours such as ~at 8~ require AM/PM.
+- Ranges and before/after constraints are rejected rather than approximated.
+- Slash dates require ISO syntax or a month name because the port ignores UK
+  ordering for ambiguous numeric dates.
+- Unsupported recurrence and partially understood dates/times are rejected.
+- Named timezones use the current Emacs timezone's fixed UTC offset at the
+  reference date.  Conversion across a DST offset change is not supported.
+
+~org-natural-dates-duckling-stop~ releases the helper process.  Disabling the
+global mode removes its advice and restores the previous parser.
+
 ** Installation
 
 *** MELPA (coming soon)

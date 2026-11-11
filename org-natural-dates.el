@@ -65,6 +65,13 @@
 
 ;;; Parsing Functions
 
+(defcustom org-natural-dates-parser-function nil
+  "Optional function parsing tasks into `org-natural-dates-parse' results.
+Nil uses the built-in Elisp parser.  An external parser must reject
+unsupported scheduling expressions rather than silently guessing."
+  :type '(choice (const nil) function)
+  :group 'org)
+
 (defun org-natural-dates--parse-repeater (str)
   "Extract repeater from STR.  Return (REPEATER . CLEANED-STR)."
   (let ((repeater nil)
@@ -195,7 +202,7 @@ Return a list (DATE TYPE CLEANED-STR) where TYPE is :scheduled or :deadline."
        (concat "+" (match-string 1 date) (substring (match-string 2 date) 0 1)))
       (_ (or date ".")))))
 
-(defun org-natural-dates-parse (input)
+(defun org-natural-dates--parse-elisp (input)
   "Parse natural language INPUT into a property list.
 Returns (:text :repeater :time :date :type :org-timestamp)."
   (let* ((res-rep (org-natural-dates--parse-repeater input))
@@ -237,6 +244,12 @@ Returns (:text :repeater :time :date :type :org-timestamp)."
           :type type
           :org-timestamp final-ts)))
 
+(defun org-natural-dates-parse (input)
+  "Parse INPUT using `org-natural-dates-parser-function' when configured."
+  (if org-natural-dates-parser-function
+      (funcall org-natural-dates-parser-function input)
+    (org-natural-dates--parse-elisp input)))
+
 ;;; Interactive Command
 
 (defvar org-natural-dates-last-result nil
@@ -251,9 +264,9 @@ KEY can be :text, :org-timestamp, :repeater, :time, :date, :type."
   "Return the appropriate timestamp line (SCHEDULED or DEADLINE)."
   (let ((ts (org-natural-dates-get :org-timestamp))
         (type (org-natural-dates-get :type)))
-    (if (eq type :deadline)
-        (concat "DEADLINE: " ts)
-      (concat "SCHEDULED: " ts))))
+    (if ts
+        (concat (if (eq type :deadline) "DEADLINE: " "SCHEDULED: ") ts)
+      "")))
 
 ;;;###autoload
 (defun org-natural-dates (&optional string)
