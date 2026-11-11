@@ -4,13 +4,82 @@
 (require 'org-natural-dates-duckling)
 (defvar org-time-was-given)
 
+(ert-deftest org-natural-dates-duckling-release-platforms ()
+  (dolist (case '((darwin "aarch64-apple-darwin" "aarch64-apple-darwin")
+                  (darwin "x86_64-apple-darwin" "x86_64-apple-darwin")
+                  (gnu/linux "aarch64-unknown-linux-gnu" "aarch64-unknown-linux-gnu")
+                  (gnu/linux "x86_64-pc-linux-gnu" "x86_64-unknown-linux-gnu")
+                  (windows-nt "x86_64-w64-mingw32" "x86_64-pc-windows-msvc")))
+    (let ((system-type (nth 0 case)) (system-configuration (nth 1 case)))
+      (should (equal (org-natural-dates-duckling--platform) (nth 2 case)))))
+  (let ((system-configuration "riscv64-linux-gnu"))
+    (should-error (org-natural-dates-duckling--platform) :type 'user-error)))
+
+(ert-deftest org-natural-dates-duckling-managed-path ()
+  (let ((org-natural-dates-duckling-directory "/tmp/custom-cache/")
+        (org-natural-dates-duckling-program nil)
+        (system-type 'darwin)
+        (system-configuration "aarch64-apple-darwin"))
+    (should (equal (org-natural-dates-duckling--program)
+                   "/tmp/custom-cache/org-natural-dates-duckling-0.1.0-aarch64-apple-darwin"))
+    (setq org-natural-dates-duckling-program "/custom/helper")
+    (should (equal (org-natural-dates-duckling--program) "/custom/helper"))))
+
+(ert-deftest org-natural-dates-duckling-install-download-and-reuse ()
+  (let* ((directory (make-temp-file "duckling-install-" t))
+         (org-natural-dates-duckling-directory directory)
+         (org-natural-dates-duckling-program nil)
+         (payload "test helper executable\n")
+         urls)
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'url-copy-file)
+                     (lambda (url target &rest _)
+                       (push url urls)
+                       (with-temp-file target
+                         (insert (if (string-suffix-p ".sha256" url)
+                                     (concat (secure-hash 'sha256 payload) "  helper\n")
+                                   payload))))))
+            (org-natural-dates-duckling-install))
+          (should (= (length urls) 2))
+          (should (file-executable-p (org-natural-dates-duckling--program)))
+          (should (string-prefix-p directory (org-natural-dates-duckling--program)))
+          (cl-letf (((symbol-function 'url-copy-file) (lambda (&rest _) (ert-fail "Unexpected repeat download"))))
+            (org-natural-dates-duckling-install)))
+      (delete-directory directory t))))
+
+(ert-deftest org-natural-dates-duckling-install-checksum-preserves-existing ()
+  (let* ((directory (make-temp-file "duckling-checksum-" t))
+         (org-natural-dates-duckling-directory directory)
+         (org-natural-dates-duckling-program nil)
+         (program (org-natural-dates-duckling--program)))
+    (unwind-protect
+        (progn
+          (with-temp-file program (insert "original helper"))
+          (set-file-modes program #o700)
+          (cl-letf (((symbol-function 'url-copy-file)
+                     (lambda (url target &rest _)
+                       (with-temp-file target
+                         (insert (if (string-suffix-p ".sha256" url)
+                                     (concat (make-string 64 ?0) "  helper\n")
+                                   "corrupt download"))))))
+            (should-error (org-natural-dates-duckling-install t)))
+          (should (equal (with-temp-buffer (insert-file-contents program) (buffer-string)) "original helper"))
+          (should-not (directory-files directory nil "\\`\\.duckling-")))
+      (delete-directory directory t))))
+
 (defmacro org-natural-dates-duckling-test-with-clock (&rest body)
   "Run BODY with a fixed clock and reference date."
   (declare (indent 0) (debug t))
   `(let* ((now (encode-time 0 0 12 11 11 2026))
+          (org-natural-dates-duckling-program
+           (or (getenv "ORG_NATURAL_DATES_DUCKLING_PROGRAM")
+               org-natural-dates-duckling-program
+               (let ((built (expand-file-name "duckling-cli/target/release/org-natural-dates-duckling" default-directory)))
+                 (when (file-executable-p built) built))))
           (org-natural-dates-duckling--reference now)
           (org-natural-dates-duckling--cache (make-hash-table :test #'equal)))
-     (unless (file-executable-p org-natural-dates-duckling-program)
+     (unless (file-executable-p (org-natural-dates-duckling--program))
        (ert-skip "Build duckling-cli before running integration tests"))
      (cl-letf (((symbol-function 'current-time) (lambda () now))) ,@body)))
 

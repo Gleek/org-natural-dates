@@ -5,7 +5,7 @@
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
 ;;; Commentary:
-;; Build duckling-cli with cargo build --release.  Enable the global mode
+;; Install the helper with org-natural-dates-duckling-install.  Enable the mode
 ;; to interpret text in Org's existing calendar prompt, including callers
 ;; such as org-timegrid.  The calendar and timestamp insertion stay in Org;
 ;; unsupported text never falls back to Org's permissive date parser.
@@ -16,16 +16,86 @@
 (require 'json)
 (require 'cl-lib)
 (require 'subr-x)
+(require 'url-handlers)
 
 (defgroup org-natural-dates-duckling nil
   "Local natural language dates for Org."
   :group 'org)
 
-(defcustom org-natural-dates-duckling-program
-  (expand-file-name "duckling-cli/target/release/org-natural-dates-duckling"
-                    (file-name-directory (or load-file-name buffer-file-name)))
-  "Path to the local Duckling JSON-lines executable."
-  :type 'file)
+(defcustom org-natural-dates-duckling-directory
+  (expand-file-name "org-natural-dates/" user-emacs-directory)
+  "Directory for downloaded Duckling executables."
+  :type 'directory)
+
+(defcustom org-natural-dates-duckling-program nil
+  "Optional path to a separately installed Duckling executable.
+Nil uses the versioned binary in `org-natural-dates-duckling-directory'."
+  :type '(choice (const nil) file))
+
+(defconst org-natural-dates-duckling--version "0.1.0")
+
+(defun org-natural-dates-duckling--platform ()
+  "Return the release target for this Emacs, or signal an error."
+  (let ((arch (cond ((string-match-p "\\`\\(?:aarch64\\|arm64\\)" system-configuration) "aarch64")
+                    ((string-match-p "\\`\\(?:x86_64\\|amd64\\)" system-configuration) "x86_64")
+                    (t (user-error "No Duckling download for %s" system-configuration)))))
+    (concat arch
+            (pcase system-type
+              ('darwin "-apple-darwin")
+              ('gnu/linux "-unknown-linux-gnu")
+              ('windows-nt (if (equal arch "x86_64") "-pc-windows-msvc"
+                             (user-error "No Windows ARM Duckling download")))
+              (_ (user-error "No Duckling download for %s" system-type))))))
+
+(defun org-natural-dates-duckling--asset ()
+  "Return the platform-specific, versioned release filename."
+  (concat "org-natural-dates-duckling-" org-natural-dates-duckling--version
+          "-" (org-natural-dates-duckling--platform)
+          (when (eq system-type 'windows-nt) ".exe")))
+
+(defun org-natural-dates-duckling--program ()
+  "Return the custom executable or its managed installation path."
+  (or org-natural-dates-duckling-program
+      (expand-file-name (org-natural-dates-duckling--asset)
+                        org-natural-dates-duckling-directory)))
+
+;;;###autoload
+(defun org-natural-dates-duckling-install (&optional force)
+  "Download and verify the helper for this machine.
+An existing executable is reused unless FORCE is non-nil (prefix argument).
+Downloads are staged beside the destination; a failed download or checksum
+does not replace the installed executable.  Rust is not required."
+  (interactive "P")
+  (let* ((program (org-natural-dates-duckling--program))
+         (directory (file-name-directory (expand-file-name program)))
+         (asset (org-natural-dates-duckling--asset))
+         (url (concat "https://github.com/Gleek/org-natural-dates/releases/download/duckling-v"
+                      org-natural-dates-duckling--version "/" asset)))
+    (unless (and (not force) (file-executable-p program))
+      (make-directory directory t)
+      (let ((binary (make-temp-file (expand-file-name ".duckling-" directory)))
+            (checksum (make-temp-file (expand-file-name ".duckling-sha256-" directory))))
+        (unwind-protect
+            (progn
+              (url-copy-file url binary t)
+              (url-copy-file (concat url ".sha256") checksum t)
+              (let ((expected (with-temp-buffer
+                                (insert-file-contents checksum)
+                                (unless (looking-at (rx (group (= 64 xdigit)) (or space eos)))
+                                  (error "Invalid Duckling checksum file"))
+                                (downcase (match-string 1))))
+                    (actual (with-temp-buffer
+                              (set-buffer-multibyte nil)
+                              (insert-file-contents-literally binary)
+                              (secure-hash 'sha256 (current-buffer)))))
+                (unless (equal expected actual) (error "Duckling checksum mismatch")))
+              (set-file-modes binary #o700)
+              (org-natural-dates-duckling-stop)
+              (rename-file binary program t))
+          (when (file-exists-p binary) (delete-file binary))
+          (when (file-exists-p checksum) (delete-file checksum)))))
+    (when (called-interactively-p 'interactive) (message "Duckling installed: %s" program))
+    program))
 
 (defvar org-natural-dates-duckling--process nil)
 (defvar org-natural-dates-duckling--output "")
@@ -61,12 +131,12 @@
     (or cached
         (progn
           (unless (process-live-p org-natural-dates-duckling--process)
-            (unless (file-executable-p org-natural-dates-duckling-program)
-              (user-error "Build the Duckling helper first: cargo build --release in duckling-cli"))
+            (unless (file-executable-p (org-natural-dates-duckling--program))
+              (user-error "Install the helper with M-x org-natural-dates-duckling-install"))
             (setq org-natural-dates-duckling--process
                   (make-process
                    :name "org-natural-dates-duckling" :noquery t
-                   :command (list org-natural-dates-duckling-program)
+                   :command (list (org-natural-dates-duckling--program))
                    :connection-type 'pipe :coding 'utf-8-unix
                    :filter (lambda (_process output)
                              (setq org-natural-dates-duckling--output

@@ -26,22 +26,41 @@ deadlines, and packages such as org-timegrid that call ~org-read-date~.  Calenda
 navigation and event decorations continue to use Org's UI.  Standalone Calendar
 and unrelated date readers are not changed.
 
-Build the helper once with Rust/Cargo:
+Download the helper once with ~M-x org-natural-dates-duckling-install~.
+The package does not bundle a binary in Git or its Elisp build directory.
+The installer selects a pinned GitHub release for the current platform,
+verifies SHA-256, and installs it under ~user-emacs-directory/org-natural-dates/~.
+An existing installation is reused; a prefix argument forces a new download.
+There is no Rust, Docker, server, model, or network connection during parsing.
+
+#+begin_src emacs-lisp
+(require 'org-natural-dates-duckling)
+;; Optional: put downloaded binaries in your cache instead.
+(setq org-natural-dates-duckling-directory
+      (expand-file-name "cache/org-natural-dates/" user-emacs-directory))
+(org-natural-dates-duckling-install)
+(org-natural-dates-duckling-mode 1)
+(add-hook 'org-capture-before-finalize-hook #'org-natural-dates-capture-finalize-hook)
+#+end_src
+
+Downloads support macOS ARM64/Intel, Linux ARM64/x86-64 (glibc 2.35+), and
+Windows x86-64.  macOS binaries require macOS 11+.  Missing downloads produce
+an actionable install error; they are not fetched while typing a date.
+Customizing the directory changes the managed path automatically.  The optional
+~org-natural-dates-duckling-program~ overrides it with a separately installed
+executable.  Failed downloads/checksums leave the current executable untouched.
+
+Developers can still build from source:
 
 #+begin_src sh
 make helper
 make check
 #+end_src
 
-There is no Docker, server, model, or network connection at runtime.
-
-#+begin_src emacs-lisp
-(require 'org-natural-dates-duckling)
-;; Set explicitly if your package manager builds Elisp in another directory.
-(setq org-natural-dates-duckling-program "/path/to/org-natural-dates/duckling-cli/target/release/org-natural-dates-duckling")
-(org-natural-dates-duckling-mode 1)
-(add-hook 'org-capture-before-finalize-hook #'org-natural-dates-capture-finalize-hook)
-#+end_src
+The test suite uses that locally built binary, or the path in the
+~ORG_NATURAL_DATES_DUCKLING_PROGRAM~ environment variable.  Release binaries
+are built by the ~duckling-v*~ tag workflow; the Cargo source and lockfile
+remain in this repository.
 
 The original Elisp parser remains the default unless this mode is enabled.
 ~org-natural-dates-parser-function~ can select a task parser independently.
