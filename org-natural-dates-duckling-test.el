@@ -25,48 +25,62 @@
     (setq org-natural-dates-duckling-program "/custom/helper")
     (should (equal (org-natural-dates-duckling--program) "/custom/helper"))))
 
-(ert-deftest org-natural-dates-duckling-install-download-and-reuse ()
+(defun org-natural-dates-duckling-test-install (valid &optional cancel)
+  "Exercise a deferred download with VALID checksum, optionally CANCEL it."
   (let* ((directory (make-temp-file "duckling-install-" t))
          (org-natural-dates-duckling-directory directory)
          (org-natural-dates-duckling-program nil)
+         (org-natural-dates-duckling--install-process nil)
+         (program (org-natural-dates-duckling--program))
          (payload "test helper executable\n")
-         urls)
+         (spawn (symbol-function 'make-process))
+         process)
     (unwind-protect
         (progn
-          (cl-letf (((symbol-function 'url-copy-file)
-                     (lambda (url target &rest _)
-                       (push url urls)
-                       (with-temp-file target
-                         (insert (if (string-suffix-p ".sha256" url)
-                                     (concat (secure-hash 'sha256 payload) "  helper\n")
-                                   payload))))))
-            (org-natural-dates-duckling-install))
-          (should (= (length urls) 2))
-          (should (file-executable-p (org-natural-dates-duckling--program)))
-          (should (string-prefix-p directory (org-natural-dates-duckling--program)))
-          (cl-letf (((symbol-function 'url-copy-file) (lambda (&rest _) (ert-fail "Unexpected repeat download"))))
-            (org-natural-dates-duckling-install)))
+          (unless valid
+            (with-temp-file program (insert "original helper"))
+            (set-file-modes program #o700))
+          (cl-letf (((symbol-function 'make-process)
+                     (lambda (&rest args)
+                       (let* ((command (plist-get args :command))
+                              (outputs (cl-loop for (arg next) on command
+                                                when (equal arg "--output") collect next)))
+                         (should (= (length outputs) 2))
+                         (with-temp-file (car outputs) (insert payload))
+                         (with-temp-file (cadr outputs)
+                           (insert (if valid (secure-hash 'sha256 payload) (make-string 64 ?0)) "  helper\n"))
+                         ;; Keep the real sentinel; delay only the transport.
+                         (apply spawn (plist-put args :command (list "sh" "-c" "sleep 0.1")))))))
+            (setq process (org-natural-dates-duckling-install t))
+            (should (process-live-p process))
+            (when valid (should-not (file-exists-p program)))
+            (should (eq process (org-natural-dates-duckling-install t))))
+          (when cancel (org-natural-dates-duckling-cancel-install))
+          (let ((deadline (+ (float-time) 5)))
+            (while (and (not (or (process-get process 'installed) (process-get process 'install-error)))
+                        (< (float-time) deadline))
+              (accept-process-output process 0.1)))
+          (if (or cancel (not valid))
+              (progn
+                (should (process-get process 'install-error))
+                (unless valid
+                  (should (equal (with-temp-buffer (insert-file-contents program) (buffer-string)) "original helper"))))
+            (should (equal (process-get process 'installed) program))
+            (should (file-executable-p program))
+            (cl-letf (((symbol-function 'make-process) (lambda (&rest _) (ert-fail "Unexpected repeat download"))))
+              (should (equal (org-natural-dates-duckling-install) program))))
+          (should-not (directory-files directory nil "\\`\\.duckling-")))
+      (when (process-live-p process) (delete-process process))
       (delete-directory directory t))))
 
+(ert-deftest org-natural-dates-duckling-install-is-asynchronous ()
+  (org-natural-dates-duckling-test-install t))
+
 (ert-deftest org-natural-dates-duckling-install-checksum-preserves-existing ()
-  (let* ((directory (make-temp-file "duckling-checksum-" t))
-         (org-natural-dates-duckling-directory directory)
-         (org-natural-dates-duckling-program nil)
-         (program (org-natural-dates-duckling--program)))
-    (unwind-protect
-        (progn
-          (with-temp-file program (insert "original helper"))
-          (set-file-modes program #o700)
-          (cl-letf (((symbol-function 'url-copy-file)
-                     (lambda (url target &rest _)
-                       (with-temp-file target
-                         (insert (if (string-suffix-p ".sha256" url)
-                                     (concat (make-string 64 ?0) "  helper\n")
-                                   "corrupt download"))))))
-            (should-error (org-natural-dates-duckling-install t)))
-          (should (equal (with-temp-buffer (insert-file-contents program) (buffer-string)) "original helper"))
-          (should-not (directory-files directory nil "\\`\\.duckling-")))
-      (delete-directory directory t))))
+  (org-natural-dates-duckling-test-install nil))
+
+(ert-deftest org-natural-dates-duckling-install-cancellation-preserves-existing ()
+  (org-natural-dates-duckling-test-install nil t))
 
 (defmacro org-natural-dates-duckling-test-with-clock (&rest body)
   "Run BODY with a fixed clock and reference date."

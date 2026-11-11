@@ -27,18 +27,22 @@ navigation and event decorations continue to use Org's UI.  Standalone Calendar
 and unrelated date readers are not changed.
 
 Download the helper once with ~M-x org-natural-dates-duckling-install~.
+It runs curl in the background and returns immediately, with progress in
+~*org-natural-dates-install*~.  Wait for the completion message before first
+use.  ~M-x org-natural-dates-duckling-cancel-install~ cancels a download.
+Installation is never started from the date prompt or package activation.
 The package does not bundle a binary in Git or its Elisp build directory.
 The installer selects a pinned GitHub release for the current platform,
 verifies SHA-256, and installs it under ~user-emacs-directory/org-natural-dates/~.
 An existing installation is reused; a prefix argument forces a new download.
-There is no Rust, Docker, server, model, or network connection during parsing.
+Only installation requires curl/network access.  There is no Rust, Docker,
+server, model, or network connection during parsing.
 
 #+begin_src emacs-lisp
 (require 'org-natural-dates-duckling)
 ;; Optional: put downloaded binaries in your cache instead.
 (setq org-natural-dates-duckling-directory
       (expand-file-name "cache/org-natural-dates/" user-emacs-directory))
-(org-natural-dates-duckling-install)
 (org-natural-dates-duckling-mode 1)
 (add-hook 'org-capture-before-finalize-hook #'org-natural-dates-capture-finalize-hook)
 #+end_src

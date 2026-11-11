@@ -16,7 +16,6 @@
 (require 'json)
 (require 'cl-lib)
 (require 'subr-x)
-(require 'url-handlers)
 
 (defgroup org-natural-dates-duckling nil
   "Local natural language dates for Org."
@@ -59,43 +58,88 @@ Nil uses the versioned binary in `org-natural-dates-duckling-directory'."
       (expand-file-name (org-natural-dates-duckling--asset)
                         org-natural-dates-duckling-directory)))
 
+(defvar org-natural-dates-duckling--install-process nil)
+
+(defun org-natural-dates-duckling--verify-install (program binary checksum)
+  "Verify BINARY against CHECKSUM and install it at PROGRAM."
+  (let ((expected (with-temp-buffer
+                    (insert-file-contents checksum)
+                    (unless (looking-at (rx (group (= 64 xdigit)) (or space eos)))
+                      (error "Invalid Duckling checksum file"))
+                    (downcase (match-string 1))))
+        (actual (with-temp-buffer
+                  (set-buffer-multibyte nil)
+                  (insert-file-contents-literally binary)
+                  (secure-hash 'sha256 (current-buffer)))))
+    (unless (equal expected actual) (error "Duckling checksum mismatch")))
+  (set-file-modes binary #o700)
+  (org-natural-dates-duckling-stop)
+  (rename-file binary program t))
+
 ;;;###autoload
 (defun org-natural-dates-duckling-install (&optional force)
-  "Download and verify the helper for this machine.
+  "Download the helper asynchronously, returning its process.
 An existing executable is reused unless FORCE is non-nil (prefix argument).
-Downloads are staged beside the destination; a failed download or checksum
-does not replace the installed executable.  Rust is not required."
+Progress and errors appear in *org-natural-dates-install*.  A failed or
+cancelled download leaves the installed executable untouched.  Requires curl."
   (interactive "P")
-  (let* ((program (org-natural-dates-duckling--program))
-         (directory (file-name-directory (expand-file-name program)))
-         (asset (org-natural-dates-duckling--asset))
-         (url (concat "https://github.com/Gleek/org-natural-dates/releases/download/duckling-v"
-                      org-natural-dates-duckling--version "/" asset)))
-    (unless (and (not force) (file-executable-p program))
+  (cond
+   ((process-live-p org-natural-dates-duckling--install-process)
+    (message "Duckling installation is already running")
+    org-natural-dates-duckling--install-process)
+   ((and (not force) (file-executable-p (org-natural-dates-duckling--program)))
+    (org-natural-dates-duckling--program))
+   (t
+    (let* ((curl (or (executable-find "curl") (user-error "Install curl to download Duckling")))
+           (program (org-natural-dates-duckling--program))
+           (directory (file-name-directory (expand-file-name program)))
+           (url (concat "https://github.com/Gleek/org-natural-dates/releases/download/duckling-v"
+                        org-natural-dates-duckling--version "/" (org-natural-dates-duckling--asset)))
+           (buffer (get-buffer-create "*org-natural-dates-install*"))
+           (options '("--ipv4" "--fail" "--location" "--progress-bar"
+                      "--connect-timeout" "10" "--max-time" "120")))
       (make-directory directory t)
       (let ((binary (make-temp-file (expand-file-name ".duckling-" directory)))
             (checksum (make-temp-file (expand-file-name ".duckling-sha256-" directory))))
-        (unwind-protect
-            (progn
-              (url-copy-file url binary t)
-              (url-copy-file (concat url ".sha256") checksum t)
-              (let ((expected (with-temp-buffer
-                                (insert-file-contents checksum)
-                                (unless (looking-at (rx (group (= 64 xdigit)) (or space eos)))
-                                  (error "Invalid Duckling checksum file"))
-                                (downcase (match-string 1))))
-                    (actual (with-temp-buffer
-                              (set-buffer-multibyte nil)
-                              (insert-file-contents-literally binary)
-                              (secure-hash 'sha256 (current-buffer)))))
-                (unless (equal expected actual) (error "Duckling checksum mismatch")))
-              (set-file-modes binary #o700)
-              (org-natural-dates-duckling-stop)
-              (rename-file binary program t))
-          (when (file-exists-p binary) (delete-file binary))
-          (when (file-exists-p checksum) (delete-file checksum)))))
-    (when (called-interactively-p 'interactive) (message "Duckling installed: %s" program))
-    program))
+        (with-current-buffer buffer (erase-buffer))
+        (condition-case error
+            (setq org-natural-dates-duckling--install-process
+                  (make-process
+                   :name "org-natural-dates-download" :buffer buffer :noquery t
+                   :connection-type 'pipe
+                   :command (append (list curl "--fail-early") options
+                                    (list "--output" binary url "--next") options
+                                    (list "--output" checksum (concat url ".sha256")))
+                   :sentinel
+                   (lambda (process _event)
+                     (when (memq (process-status process) '(exit signal))
+                       (unwind-protect
+                           (condition-case error
+                               (progn
+                                 (unless (and (eq (process-status process) 'exit)
+                                              (zerop (process-exit-status process)))
+                                   (error "Duckling download failed/cancelled; see %s" (buffer-name buffer)))
+                                 (org-natural-dates-duckling--verify-install program binary checksum)
+                                 (process-put process 'installed program)
+                                 (message "Duckling installed: %s" program))
+                             (error
+                              (process-put process 'install-error (error-message-string error))
+                              (message "%s" (error-message-string error))))
+                         (when (file-exists-p binary) (delete-file binary))
+                         (when (file-exists-p checksum) (delete-file checksum)))))))
+          (error
+           (delete-file binary)
+           (delete-file checksum)
+           (signal (car error) (cdr error)))))
+      (when (called-interactively-p 'interactive) (display-buffer buffer))
+      (message "Downloading Duckling in the background")
+      org-natural-dates-duckling--install-process))))
+
+(defun org-natural-dates-duckling-cancel-install ()
+  "Cancel the background helper download."
+  (interactive)
+  (when (process-live-p org-natural-dates-duckling--install-process)
+    (delete-process org-natural-dates-duckling--install-process)))
 
 (defvar org-natural-dates-duckling--process nil)
 (defvar org-natural-dates-duckling--output "")
