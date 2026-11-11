@@ -221,6 +221,26 @@
           (should (equal (org-read-date t nil "8am" nil now) "2026-11-11 08:00")))
       (org-natural-dates-duckling-mode -1))))
 
+(ert-deftest org-natural-dates-duckling-today-versus-edited-date ()
+  (org-natural-dates-duckling-test-with-clock
+    (unwind-protect
+        (let ((default (encode-time 0 0 11 12 11 2026)))
+          (org-natural-dates-duckling-mode 1)
+          (dolist (case '(("tomorrow 11:30" "2026-11-12 11:30")
+                          ("today" "2026-11-11")
+                          ("next week" "2026-11-16")
+                          ("in 1 day" "2026-11-12")
+                          ("after 1 day 11:30" "2026-11-13 11:30")
+                          ("++1d 11:30" "2026-11-13 11:30")
+                          ("+1d 11:30" "2026-11-12 11:30")
+                          ("11:30" "2026-11-12 11:30")
+                          ("" "2026-11-12")))
+            (ert-info ((car case))
+              (should (equal (org-read-date nil nil (car case) nil default) (cadr case)))))
+          (should (equal (org-read-date t nil "" nil default) "2026-11-12 11:00"))
+          (should (equal (org-read-date t nil "tomorrow" nil default) "2026-11-12 11:00")))
+      (org-natural-dates-duckling-mode -1))))
+
 (ert-deftest org-natural-dates-duckling-timegrid-date-reader ()
   (org-natural-dates-duckling-test-with-clock
     (unless (require 'org-timegrid-calendar nil t)

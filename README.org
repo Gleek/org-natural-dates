@@ -77,7 +77,12 @@ The original Elisp parser remains the default unless this mode is enabled.
 | ~+2d~, ~+2~, ~+1w~, ~-2d~ | Offsets from today                          |
 | ~+2h~                     | Two hours from now                          |
 | ~++2d~, ~--1w~            | Offsets from the date being edited          |
+| ~after 1 day~             | One day after the date being edited         |
 | ~.~                       | Today                                       |
+
+~today~, ~tomorrow~, weekdays, and ~in N days~ use the real current date, even
+when editing a future timestamp.  ~after N days~ and double-sign shorthand
+instead use the date being edited as their reference.
 
 Shorthand is translated to full unit names before Duckling parses it.  Blank
 input accepts the default/selected date.  Clock-only edits keep the selected

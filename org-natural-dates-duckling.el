@@ -157,6 +157,7 @@ cancelled download leaves the installed executable untouched.  Requires curl."
 (defvar org-read-date-overlay)
 (defvar org-time-was-given)
 (defvar org-end-time-was-given)
+(defvar org-with-time)
 
 (defun org-natural-dates-duckling-stop ()
   "Stop the local parser process."
@@ -209,8 +210,11 @@ cancelled download leaves the installed executable untouched.  Requires curl."
 
 (defun org-natural-dates-duckling--normalize (input reference)
   "Translate explicit shorthand in INPUT, returning (TEXT . REFERENCE).
-Single signs use today; double signs use the supplied REFERENCE."
+Ordinary phrases and single signs use today.  Double signs and explicit
+\"after N days\" offsets use the supplied REFERENCE."
   (let ((text (string-trim input))
+        (default reference)
+        (reference (current-time))
         (case-fold-search t))
     (when (string-match (rx bos (any "<[") (group (* any)) (any ">]") eos) text)
       (setq text (match-string 1 text)))
@@ -221,7 +225,12 @@ Single signs use today; double signs use the supplied REFERENCE."
       (setq text (concat (substring text 0 (match-beginning 1))
                          (substring text (match-end 1)))))
     (cond
+     ((string-empty-p text) (setq reference default))
      ((string= text ".") (setq text "today" reference (current-time)))
+     ((string-match-p (rx bos "after" (+ space) (+ digit) (+ space)
+                          (or "hour" "day" "week" "month" "year") (? "s") eow) text)
+      (setq reference default
+            text (replace-regexp-in-string (rx bos "after" (+ space)) "in " text)))
      ((string-match org-natural-dates-duckling--offset-regexp text)
       (let* ((sign (match-string 1 text))
              (number (match-string 2 text))
@@ -230,7 +239,7 @@ Single signs use today; double signs use the supplied REFERENCE."
              (word (cdr (assoc unit '(("" . "days") ("h" . "hours")
                                       ("d" . "days") ("w" . "weeks")
                                       ("m" . "months") ("y" . "years"))))))
-        (when (= (length sign) 1) (setq reference (current-time)))
+        (when (= (length sign) 2) (setq reference default))
         (setq text (concat (if (string-prefix-p "+" sign)
                               (format "in %s %s" number word)
                             (format "%s %s ago" number word))
@@ -285,6 +294,7 @@ Single signs use today; double signs use the supplied REFERENCE."
                                        (* space) (? (or "am" "pm")) eos)
                                    normalized)))
                  ;; Clock-only edits keep the calendar's selected day.
+                 (base (if clock-only reference base))
                  (normalized (if clock-only
                                  (concat (format-time-string "%Y-%m-%d" base) " at "
                                          (string-remove-prefix "at " normalized))
@@ -367,7 +377,7 @@ Single signs use today; double signs use the supplied REFERENCE."
            (time (or (plist-get parsed :time) (format-time-string "%H:%M" default))))
       (when (plist-get parsed :repeater)
         (user-error "Use natural language capture for recurrence; the date prompt cannot return a repeater"))
-      (setq org-time-was-given (and (plist-get parsed :time) t)
+      (setq org-time-was-given (and (or (plist-get parsed :time) org-with-time) t)
             org-end-time-was-given nil
             org-read-date-analyze-futurep nil
             org-read-date-analyze-forced-year nil)
